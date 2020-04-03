@@ -1,0 +1,19 @@
+[package]
+name = "serde-pyo3"
+version = "0.1.0"
+authors = ["Andrew Whitehead"]
+edition = "2018"
+description = ""
+license = "MIT/Apache-2.0"
+
+[lib]
+name = "serde_pyo3"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+pyo3 = "0.9.1"
+serde = "1.0.99"
+
+[dev-dependencies]
+serde_json = "1.0.40"
