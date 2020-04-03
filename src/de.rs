@@ -1,12 +1,12 @@
+use pyo3::buffer::PyBuffer;
+use pyo3::types::{PyDict, PyIterator, PyList, PySequence, PyString, PyTuple};
+use pyo3::{AsPyPointer, FromPyObject, PyAny, PyTryFrom, PyTypeInfo, Python};
+
 use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess, VariantAccess,
     Visitor,
 };
 use serde::Deserialize;
-
-use pyo3::buffer::PyBuffer;
-use pyo3::types::{PyDict, PyIterator, PyList, PySequence, PyString, PyTuple};
-use pyo3::{AsPyPointer, FromPyObject, PyAny, PyTryFrom, PyTypeInfo, Python};
 
 use super::error::{Error, Result};
 
@@ -31,15 +31,31 @@ where
 
 impl<'de> Deserializer<'de> {
     #[inline]
-    fn downcast<T>(&mut self) -> Result<T>
+    fn expect<T>(&mut self, expected: Error) -> Result<T>
     where
         T: for<'a> FromPyObject<'a>,
     {
         if let Ok(result) = T::extract(self.input) {
             Ok(result)
         } else {
-            Err(Error::ExpectedInteger)
+            Err(expected)
         }
+    }
+
+    #[inline]
+    fn try_extract<T>(&mut self) -> Option<T>
+    where
+        T: for<'a> FromPyObject<'a>,
+    {
+        T::extract(self.input).ok()
+    }
+
+    #[inline]
+    fn try_from<T>(&mut self) -> Option<&'de T>
+    where
+        T: for<'a> PyTryFrom<'a>,
+    {
+        T::try_from(self.input).ok()
     }
 
     #[inline]
@@ -57,13 +73,14 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         if self.is_none() {
             visitor.visit_unit()
-        } else if let Ok(val) = self.downcast::<String>() {
-            visitor.visit_string(val)
-        } else if let Ok(val) = self.downcast::<bool>() {
+        } else if let Some(val) = self.try_from::<PyString>() {
+            let strval = unsafe { std::str::from_utf8_unchecked(val.as_bytes()?) };
+            visitor.visit_borrowed_str(strval)
+        } else if let Some(val) = self.try_extract::<bool>() {
             visitor.visit_bool(val)
-        } else if let Ok(val) = self.downcast::<u64>() {
+        } else if let Some(val) = self.try_extract::<u64>() {
             visitor.visit_u64(val)
-        } else if let Ok(val) = self.downcast::<f64>() {
+        } else if let Some(val) = self.try_extract::<f64>() {
             visitor.visit_f64(val)
         } else if <PyList as PyTypeInfo>::is_instance(self.input)
             || <PyTuple as PyTypeInfo>::is_instance(self.input)
@@ -72,7 +89,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         } else if <PyDict as PyTypeInfo>::is_instance(self.input) {
             self.deserialize_map(visitor)
         } else {
-            Err(Error::Syntax)
+            Err(Error::Unsupported)
         }
     }
 
@@ -80,90 +97,88 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        visitor.visit_bool(self.downcast()?)
+        visitor.visit_bool(self.expect(Error::ExpectedBoolean)?)
     }
 
-    // The `parse_signed` function is generic over the integer type `T` so here
-    // it is invoked with `T=i8`. The next 8 methods are similar.
     fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_i8(self.downcast()?)
+        visitor.visit_i8(self.expect(Error::ExpectedInteger)?)
     }
 
     fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_i16(self.downcast()?)
+        visitor.visit_i16(self.expect(Error::ExpectedInteger)?)
     }
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_i32(self.downcast()?)
+        visitor.visit_i32(self.expect(Error::ExpectedInteger)?)
     }
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_i64(self.downcast()?)
+        visitor.visit_i64(self.expect(Error::ExpectedInteger)?)
     }
 
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_u8(self.downcast()?)
+        visitor.visit_u8(self.expect(Error::ExpectedInteger)?)
     }
 
     fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_u16(self.downcast()?)
+        visitor.visit_u16(self.expect(Error::ExpectedInteger)?)
     }
 
     fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_u32(self.downcast()?)
+        visitor.visit_u32(self.expect(Error::ExpectedInteger)?)
     }
 
     fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_u64(self.downcast()?)
+        visitor.visit_u64(self.expect(Error::ExpectedInteger)?)
     }
 
     fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_f32(self.downcast()?)
+        visitor.visit_f32(self.expect(Error::ExpectedFloat)?)
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_f64(self.downcast()?)
+        visitor.visit_f64(self.expect(Error::ExpectedFloat)?)
     }
 
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        let strval = self.downcast::<String>()?;
+        let strval = self.expect::<String>(Error::ExpectedChar)?;
         if strval.len() == 1 {
             visitor.visit_char(strval.chars().next().unwrap())
         } else {
-            Err(Error::ExpectedString)
+            Err(Error::ExpectedChar)
         }
     }
 
@@ -171,16 +186,19 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        let strval = <PyString as PyTryFrom>::try_from(self.input)?;
-        let strval = unsafe { std::str::from_utf8_unchecked(strval.as_bytes()?) };
-        visitor.visit_borrowed_str(strval)
+        if let Some(strval) = self.try_from::<PyString>() {
+            let strval = unsafe { std::str::from_utf8_unchecked(strval.as_bytes()?) };
+            visitor.visit_borrowed_str(strval)
+        } else {
+            Err(Error::ExpectedString)
+        }
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_string(self.downcast::<String>()?)
+        visitor.visit_string(self.expect::<String>(Error::ExpectedString)?)
     }
 
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
@@ -193,7 +211,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 unsafe { std::slice::from_raw_parts(buf.buf_ptr() as *const u8, buf.item_count()) };
             visitor.visit_borrowed_bytes(buf)
         } else {
-            Err(Error::ExpectedNull)
+            Err(Error::ExpectedBytes)
         }
     }
 
@@ -201,7 +219,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        let bytes = self.downcast::<Vec<u8>>()?;
+        let bytes = self.expect::<Vec<u8>>(Error::ExpectedBytes)?;
         visitor.visit_byte_buf(bytes)
     }
 
@@ -223,7 +241,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         if self.is_none() {
             visitor.visit_unit()
         } else {
-            Err(Error::ExpectedNull)
+            Err(Error::ExpectedNone)
         }
     }
 
@@ -245,14 +263,17 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        let seq = <PySequence as PyTryFrom>::try_from(self.input)?;
-        match PyIterator::from_object(self.py, seq) {
-            Ok(iter) => {
-                let size = seq.len().map(|x| x as usize).ok();
-                let value = visitor.visit_seq(SeqIter::new(self.py, iter, size))?;
-                Ok(value)
+        if let Some(seq) = self.try_from::<PySequence>() {
+            match PyIterator::from_object(self.py, seq) {
+                Ok(iter) => {
+                    let size = seq.len().map(|x| x as usize).ok();
+                    let value = visitor.visit_seq(SeqIter::new(self.py, iter, size))?;
+                    Ok(value)
+                }
+                Err(_) => Err(Error::ExpectedList),
             }
-            Err(_) => Err(Error::ExpectedArray),
+        } else {
+            Err(Error::ExpectedList)
         }
     }
 
@@ -279,8 +300,11 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        let dict = <PyDict as PyTryFrom>::try_from(self.input)?;
-        visitor.visit_map(DictIter::new(self.py, dict))
+        if let Some(dict) = self.try_from::<PyDict>() {
+            visitor.visit_map(DictIter::new(self.py, dict))
+        } else {
+            Err(Error::ExpectedDict)
+        }
     }
 
     fn deserialize_struct<V>(
@@ -305,19 +329,22 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         if <PyString as PyTypeInfo>::is_instance(self.input) {
-            let key: String = self.downcast()?;
+            let key: String = self.expect(Error::ExpectedString)?;
             visitor.visit_enum(key.into_deserializer())
         } else {
-            let dict = <PyDict as PyTryFrom>::try_from(self.input)?;
-            if let Some(key) = dict.keys().iter().next() {
-                if let Some(val) = dict.get_item(key) {
-                    let value = visitor.visit_enum(Enum::new(self.py, key, val))?;
-                    Ok(value)
+            if let Some(dict) = self.try_from::<PyDict>() {
+                if let Some(key) = dict.keys().iter().next() {
+                    if let Some(val) = dict.get_item(key) {
+                        let value = visitor.visit_enum(Enum::new(self.py, key, val))?;
+                        Ok(value)
+                    } else {
+                        Err(Error::ExpectedEnumValue)
+                    }
                 } else {
-                    Err(Error::ExpectedMapComma)
+                    Err(Error::ExpectedEnumKey)
                 }
             } else {
-                Err(Error::ExpectedMapComma)
+                Err(Error::ExpectedDict)
             }
         }
     }
@@ -333,7 +360,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        // result is ignored, can we skip downcast?
+        // result is ignored, can we skip deserialize?
         self.deserialize_any(visitor)
     }
 }
@@ -362,7 +389,7 @@ impl<'de, 'a: 'de> SeqAccess<'de> for SeqIter<'a> {
                 Ok(val) => seed
                     .deserialize(&mut Deserializer::from_py(self.py.clone(), val))
                     .map(Some),
-                Err(_) => Err(Error::ExpectedMapComma),
+                Err(_) => Err(Error::ExpectedListElement),
             }
         } else {
             Ok(None)
@@ -420,7 +447,7 @@ impl<'de, 'a: 'de> MapAccess<'de> for DictIter<'a> {
         if let Some(item) = self.input.get_item(self.keys.get_item(idx)) {
             seed.deserialize(&mut Deserializer::from_py(self.py.clone(), item))
         } else {
-            Err(Error::ExpectedMapComma)
+            Err(Error::ExpectedDictValue)
         }
     }
 }
@@ -490,7 +517,7 @@ mod tests {
     use std::collections::HashMap;
     use std::iter::FromIterator;
 
-    fn py_eval<'de, T: Deserialize<'de>>(py: Python<'de>, val: &str) -> T {
+    fn py_eval_into<'de, T: Deserialize<'de>>(py: Python<'de>, val: &str) -> T {
         let locals = PyDict::new(py);
         py.run(format!("ret = {}", val).as_str(), None, Some(locals))
             .unwrap();
@@ -508,7 +535,7 @@ mod tests {
 
         let gil = Python::acquire_gil();
         let py = gil.python();
-        let result: Test = py_eval(py, r#"{"seq":["a","b"], "int":1}"#);
+        let result: Test = py_eval_into(py, r#"{"seq":["a","b"], "int":1}"#);
         assert_eq!(
             result,
             Test {
@@ -522,7 +549,7 @@ mod tests {
     fn test_map() {
         let gil = Python::acquire_gil();
         let py = gil.python();
-        let result: HashMap<&str, u32> = py_eval(py, r#"{"one": 1, "two": 2}"#);
+        let result: HashMap<&str, u32> = py_eval_into(py, r#"{"one": 1, "two": 2}"#);
         assert_eq!(
             result,
             HashMap::from_iter(vec![("one", 1), ("two", 2)].into_iter())
@@ -533,7 +560,7 @@ mod tests {
     fn test_bytes_buf() {
         let gil = Python::acquire_gil();
         let py = gil.python();
-        let result: Vec<u8> = py_eval(py, r#"b"abc""#);
+        let result: Vec<u8> = py_eval_into(py, r#"b"abc""#);
         assert_eq!(result, vec![97u8, 98u8, 99u8]);
     }
 
@@ -541,7 +568,7 @@ mod tests {
     fn test_bytes_borrowed() {
         let gil = Python::acquire_gil();
         let py = gil.python();
-        let result: &[u8] = py_eval(py, r#"b"abc""#);
+        let result: &[u8] = py_eval_into(py, r#"b"abc""#);
         assert_eq!(result, &[97u8, 98u8, 99u8]);
     }
 
@@ -558,16 +585,16 @@ mod tests {
         let gil = Python::acquire_gil();
         let py = gil.python();
 
-        let result: E = py_eval(py, r#""Unit""#);
+        let result: E = py_eval_into(py, r#""Unit""#);
         assert_eq!(result, E::Unit);
 
-        let result: E = py_eval(py, r#"{"Newtype":1}"#);
+        let result: E = py_eval_into(py, r#"{"Newtype":1}"#);
         assert_eq!(result, E::Newtype(1));
 
-        let result: E = py_eval(py, r#"{"Tuple":[1,2]}"#);
+        let result: E = py_eval_into(py, r#"{"Tuple":[1,2]}"#);
         assert_eq!(result, E::Tuple(1, 2));
 
-        let result: E = py_eval(py, r#"{"Struct":{"a":1}}"#);
+        let result: E = py_eval_into(py, r#"{"Struct":{"a":1}}"#);
         assert_eq!(result, E::Struct { a: 1 });
     }
 

@@ -5,40 +5,24 @@ use serde::{de, ser};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-// This is a bare-bones implementation. A real library would provide additional
-// information in its error type, for example the line and column at which the
-// error occurred, the byte offset into the input, or the current key being
-// processed.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
-    // One or more variants that can be created by data structures through the
-    // `ser::Error` and `de::Error` traits. For example the Serialize impl for
-    // Mutex<T> might return an error because the mutex is poisoned, or the
-    // Deserialize impl for a struct may return an error because a required
-    // field is missing.
     Message(String),
-
-    // Zero or more variants that can be created directly by the Serializer and
-    // Deserializer without going through `ser::Error` and `de::Error`. These
-    // are specific to the format, in this case JSON.
-    Eof,
-    Syntax,
-    ExpectedBoolean,
-    ExpectedInteger,
-    ExpectedString,
-    ExpectedNull,
-    ExpectedArray,
-    ExpectedArrayComma,
-    ExpectedArrayEnd,
-    ExpectedMap,
-    ExpectedMapColon,
-    ExpectedMapComma,
-    ExpectedMapEnd,
-    ExpectedEnum,
-    TrailingCharacters,
-
     PyErr(String),
-    PyDowncastError,
+    ExpectedBoolean,
+    ExpectedBytes,
+    ExpectedChar,
+    ExpectedDict,
+    ExpectedDictValue,
+    ExpectedEnumKey,
+    ExpectedEnumValue,
+    ExpectedFloat,
+    ExpectedInteger,
+    ExpectedList,
+    ExpectedListElement,
+    ExpectedNone,
+    ExpectedString,
+    Unsupported,
 }
 
 impl ser::Error for Error {
@@ -55,12 +39,25 @@ impl de::Error for Error {
 
 impl Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        /*match self {
-            Error::Message(msg) => formatter.write_str(msg),
-            Error::Eof => formatter.write_str("unexpected end of input"),
-            /* and so forth */
-        }*/
-        formatter.write_str("error!")
+        let msg = match self {
+            Error::Message(msg) => msg,
+            Error::PyErr(msg) => msg,
+            Error::ExpectedBoolean => "expected: boolean",
+            Error::ExpectedBytes => "expected: bytes",
+            Error::ExpectedChar => "expected: single character",
+            Error::ExpectedDict => "expected: dict",
+            Error::ExpectedDictValue => "expected: dict value",
+            Error::ExpectedEnumKey => "expected: non-empty dict",
+            Error::ExpectedEnumValue => "expected: non-empty dict value",
+            Error::ExpectedFloat => "expected: float",
+            Error::ExpectedInteger => "expected: integer",
+            Error::ExpectedList => "expected: list",
+            Error::ExpectedListElement => "expected: list element",
+            Error::ExpectedNone => "expected: none",
+            Error::ExpectedString => "expected: string",
+            Error::Unsupported => "unsupported input value",
+        };
+        formatter.write_str(msg)
     }
 }
 
@@ -69,11 +66,5 @@ impl std::error::Error for Error {}
 impl From<pyo3::PyErr> for Error {
     fn from(py_err: pyo3::PyErr) -> Error {
         Error::PyErr(format!("{:?}", py_err))
-    }
-}
-
-impl From<pyo3::PyDowncastError> for Error {
-    fn from(_err: pyo3::PyDowncastError) -> Error {
-        Error::PyDowncastError
     }
 }
