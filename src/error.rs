@@ -1,14 +1,15 @@
 use std;
 use std::fmt::{self, Display};
 
+use pyo3::{exceptions::Exception, exceptions::TypeError, PyErr, PyResult};
 use serde::{de, ser};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Error {
     Message(String),
-    PyErr(String),
+    PyErr(PyErr),
     ExpectedBoolean,
     ExpectedBytes,
     ExpectedChar,
@@ -41,7 +42,7 @@ impl Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         let msg = match self {
             Error::Message(msg) => msg,
-            Error::PyErr(msg) => msg,
+            Error::PyErr(err) => return write!(formatter, "{:?}", err),
             Error::ExpectedBoolean => "expected: boolean",
             Error::ExpectedBytes => "expected: bytes",
             Error::ExpectedChar => "expected: single character",
@@ -63,8 +64,31 @@ impl Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<pyo3::PyErr> for Error {
-    fn from(py_err: pyo3::PyErr) -> Error {
-        Error::PyErr(format!("{:?}", py_err))
+impl From<PyErr> for Error {
+    fn from(py_err: PyErr) -> Error {
+        Error::PyErr(py_err)
+    }
+}
+
+impl Into<PyErr> for Error {
+    fn into(self) -> PyErr {
+        match self {
+            Error::PyErr(err) => err,
+            Error::Message(msg) => Exception::py_err(msg),
+            err => TypeError::py_err(err.to_string()),
+        }
+    }
+}
+
+pub trait ResultExt<T> {
+    fn to_py_result(self) -> PyResult<T>;
+}
+
+impl<T> ResultExt<T> for Result<T> {
+    fn to_py_result(self) -> PyResult<T> {
+        match self {
+            Ok(val) => Ok(val),
+            Err(err) => Err(err.into()),
+        }
     }
 }
